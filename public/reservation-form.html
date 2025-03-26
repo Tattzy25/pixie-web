@@ -1,0 +1,484 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <script type="module">
+        import CONFIG, { SUPABASE_URL, SUPABASE_KEY, SUPABASE_TABLE, PAYPAL_CLIENT_ID } from './config.js';
+        
+        // Make these available to non-module scripts
+        window.SUPABASE_URL = SUPABASE_URL;
+        window.SUPABASE_KEY = SUPABASE_KEY;
+        window.SUPABASE_TABLE = SUPABASE_TABLE;
+        window.PAYPAL_CLIENT_ID = PAYPAL_CLIENT_ID;
+        window.CONFIG = CONFIG;
+        
+        // Now load PayPal dynamically
+        const script = document.createElement('script');
+        script.src = `https://www.paypal.com/sdk/js?client-id=${PAYPAL_CLIENT_ID}`;
+        document.head.appendChild(script);
+    </script>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Rental Reservation</title>
+  <style>
+    :root {
+      --accent: #00fff7;
+      --dark: #1e1e1e;
+      --light: #ffffff;
+    }
+    body {
+      background: radial-gradient(circle at top left, #121212, var(--dark));
+      font-family: 'Segoe UI', sans-serif;
+      color: var(--light);
+      padding: 20px;
+      margin: 0;
+    }
+    .form-slide {
+      max-width: 600px;
+      margin: auto;
+      background: rgba(255,255,255,0.05);
+      border-radius: 16px;
+      padding: 30px;
+      box-shadow: 0 0 30px var(--accent);
+      backdrop-filter: blur(8px);
+    }
+    h2 { text-align: center; font-size: 1.6em; }
+    label {
+      display: block;
+      font-size: 1.1em;
+      margin: 15px 0 5px;
+    }
+    input, select {
+      width: 100%;
+      padding: 14px;
+      font-size: 1em;
+      border: none;
+      border-radius: 10px;
+      background: rgba(255,255,255,0.1);
+      color: var(--light);
+    }
+    input:focus, select:focus {
+      outline: 2px solid var(--accent);
+      background: rgba(255,255,255,0.2);
+    }
+    .step {
+      display: none;
+      animation: fade .4s ease-in-out;
+    }
+    .step.active { display: block; }
+    button {
+      padding: 12px 24px;
+      background: var(--accent);
+      color: #000;
+      border: none;
+      border-radius: 10px;
+      font-weight: bold;
+      cursor: pointer;
+      margin-top: 20px;
+      font-size: 1em;
+    }
+    button:hover { background: #0ff8f0; }
+    .prev { background: #ccc; color: #000; }
+    .checkbox-group {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+    }
+    .checkbox-group label {
+      flex: 1 1 48%;
+      background: rgba(255,255,255,0.1);
+      padding: 10px;
+      border-radius: 8px;
+      text-align: center;
+      cursor: pointer;
+    }
+    .checkbox-group input[type="checkbox"] {
+      margin-right: 8px;
+    }
+    #summary p { margin: 5px 0; font-size: 1em; }
+    #progressBar {
+      height: 8px;
+      background: #444;
+      border-radius: 20px;
+      overflow: hidden;
+      margin-bottom: 20px;
+    }
+    #progressBarFill {
+      height: 100%;
+      background: var(--accent);
+      width: 0%;
+      transition: width 0.3s ease-in-out;
+    }
+    @keyframes fade {
+      from { opacity: 0; transform: translateY(20px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+    #loadingOverlay {
+      display: none;
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(0, 0, 0, 0.7);
+      z-index: 1000;
+      justify-content: center;
+      align-items: center;
+      flex-direction: column;
+    }
+    
+    .spinner {
+      width: 50px;
+      height: 50px;
+      border: 5px solid rgba(255, 255, 255, 0.3);
+      border-radius: 50%;
+      border-top-color: var(--accent);
+      animation: spin 1s ease-in-out infinite;
+      margin-bottom: 20px;
+    }
+    
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+    select option {
+  background-color: #1e1e1e;
+  color: #fff;
+}
+  </style>
+  <!-- Replace the hardcoded PayPal script with one that uses the config constant -->
+  <script src="config.js"></script>
+  <script>
+    document.write(`<script src="https://www.paypal.com/sdk/js?client-id=${PAYPAL_CLIENT_ID}"><\/script>`);
+  </script>
+</head>
+<body>
+  <div class="form-slide">
+    <div id="progressBar"><div id="progressBarFill"></div></div>
+    <form id="rentalWizard">
+      <!-- Step 1 -->
+      <div class="step active">
+        <h2>Choose Your Rental Dates</h2>
+        <label>Start Date:
+          <input type="date" id="startDate" required placeholder="📅 Start date">
+        </label>
+        <label>End Date:
+          <input type="date" id="endDate" required placeholder="📅 End date">
+        </label>
+        <p><small>* Each day is a full rental day</small></p>
+        <button type="button" class="next">Next</button>
+      </div>
+
+      <!-- Step 2 -->
+      <div class="step">
+        <h2>Delivery Location</h2>
+        <div class="checkbox-group">
+          <label><input type="checkbox" class="location" value="Disneyland"> Disneyland</label>
+          <label><input type="checkbox" class="location" value="Universal Studios"> Universal Studios</label>
+          <label><input type="checkbox" class="location" value="Airbnb"> Airbnb</label>
+          <label><input type="checkbox" class="location" value="Other"> Other</label>
+        </div>
+        <label>Hotel Name:
+          <input type="text" id="hotelName">
+        </label>
+        <label>Hotel Address:
+          <input type="text" id="hotelAddress">
+        </label>
+        <button type="button" class="prev">Back</button>
+        <button type="button" class="next">Next</button>
+      </div>
+
+      <!-- Step 3 -->
+      <div class="step">
+        <h2>Select a Product</h2>
+        <select id="productSelect" required>
+          <option value="">Choose...</option>
+          <option value="single-stroller">Single Stroller</option>
+          <option value="double-stroller">Double Stroller</option>
+          <option value="mobility-scooter">Mobility Scooter</option>
+        </select>
+        <button type="button" class="prev">Back</button>
+        <button type="button" class="next">Next</button>
+      </div>
+
+      <!-- Step 4 -->
+      <div class="step">
+        <h2>Your Info</h2>
+        <label>Full Name: <input type="text" id="custName" required></label>
+        <label>Phone: <input type="tel" id="custPhone" required></label>
+        <label>Email: <input type="email" id="custEmail" required></label>
+        <label>How did you hear about us? <input type="text" id="referral"></label>
+        <label>Promo Code: <input type="text" id="promoCode"></label>
+        <button type="button" class="prev">Back</button>
+        <button type="button" class="next">Next</button>
+      </div>
+
+      <!-- Step 5 -->
+      <div class="step">
+        <h2>Review & Pay</h2>
+        <div id="summary"></div>
+        <div id="paypal-button-container"></div>
+        <button type="button" class="prev">Back</button>
+      </div>
+    </form>
+  </div>
+
+  <script>
+    const supabase = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+    const steps = document.querySelectorAll(".step");
+    const progressBar = document.getElementById("progressBarFill");
+    let currentStep = 0;
+    
+    // Use the MailerLite API key from CONFIG
+    const apiKey = CONFIG.mailerLiteApiKey;
+    
+    function updateProgressBar() {
+      const percent = (currentStep / (steps.length - 1)) * 100;
+      progressBar.style.width = percent + "%";
+    }
+  
+    document.querySelectorAll(".next").forEach(btn =>
+      btn.addEventListener("click", () => {
+        if (currentStep === 0) {
+          const start = document.getElementById("startDate").value;
+          const end = document.getElementById("endDate").value;
+          if (!start || !end) {
+            alert("Please select both Start and End Dates before continuing.");
+            return;
+          }
+          if (document.querySelector(".location[value='Disneyland']")?.checked) {
+            const days = calculateDays(start, end);
+            if (days < 3) {
+              alert("For Disneyland deliveries, a minimum 3-day rental is required.");
+              return;
+            }
+          }
+        }
+  
+        if (currentStep < steps.length - 1) {
+          steps[currentStep].classList.remove("active");
+          currentStep++;
+          steps[currentStep].classList.add("active");
+          updateProgressBar();
+          if (currentStep === steps.length - 1) updateSummary();
+        }
+      })
+    );
+  
+    document.querySelectorAll(".prev").forEach(btn =>
+      btn.addEventListener("click", () => {
+        if (currentStep > 0) {
+          steps[currentStep].classList.remove("active");
+          currentStep--;
+          steps[currentStep].classList.add("active");
+          updateProgressBar();
+        }
+      })
+    );
+  
+    const productCatalog = {
+      'single-stroller': { label: 'Single Stroller', pricePerDay: 29 },
+      'double-stroller': { label: 'Double Stroller', pricePerDay: 34 },
+      'mobility-scooter': { label: 'Mobility Scooter', pricePerDay: 59 }
+    };
+  
+    const taxRate = 0.0975;
+  
+    const promoCodes = {
+      PIXIE10: { percent: 10 },
+      INSTASCOOT10: { percent: 10 },
+      DOUBLE15: { percent: 15 }
+    };
+  
+    function getTieredDiscount(days) {
+      if (days >= 7) return 40;
+      if (days === 6) return 35;
+      if (days === 5) return 30;
+      if (days === 4) return 25;
+      if (days === 3) return 20;
+      if (days === 2) return 15;
+      return 0;
+    }
+  
+    function calculateDays(start, end) {
+      const startDate = new Date(start);
+      const endDate = new Date(end);
+      return Math.ceil((endDate - startDate) / (1000 * 60 * 60 * 24)) + 1;
+    }
+  
+    function updateDurationDisplay() {
+      const start = document.getElementById("startDate").value;
+      const end = document.getElementById("endDate").value;
+      const display = document.getElementById("durationDisplay");
+      if (start && end) {
+        const days = calculateDays(start, end);
+        display.textContent = `Rental Duration: ${days} day${days > 1 ? 's' : ''}`;
+      } else {
+        display.textContent = "";
+      }
+    }
+  
+    function updateSummary() {
+      const start = document.getElementById("startDate").value;
+      const end = document.getElementById("endDate").value;
+      const days = calculateDays(start, end);
+      const productKey = document.getElementById("productSelect").value;
+  
+      const base = productCatalog[productKey].pricePerDay * days;
+      const discountRate = getTieredDiscount(days);
+      const discountAmount = base * (discountRate / 100);
+      let subtotal = base - discountAmount;
+  
+      const promoInput = document.getElementById("promoCode").value.trim().toUpperCase();
+      let promoDiscount = 0;
+      let promoMessage = "";
+  
+      if (promoCodes[promoInput]) {
+        promoDiscount = subtotal * (promoCodes[promoInput].percent / 100);
+        subtotal -= promoDiscount;
+        promoMessage = `<p><strong>Promo Code (${promoInput}):</strong> -${promoCodes[promoInput].percent}%</p>`;
+      }
+  
+      const tax = subtotal * taxRate;
+      const total = (subtotal + tax).toFixed(2);
+  
+      const locations = Array.from(document.querySelectorAll(".location:checked")).map(loc => loc.value).join(", ") || "Not specified";
+      const hotelName = document.getElementById("hotelName").value || "N/A";
+      const hotelAddress = document.getElementById("hotelAddress").value || "Hilton Universal Hotel (Default)";
+  
+      document.getElementById("summary").innerHTML = `
+        <h3>Quick Summary</h3>
+        <p><strong>Product:</strong> ${productCatalog[productKey].label}</p>
+        <p><strong>Rental Dates:</strong> ${start} to ${end}</p>
+        <p><strong>Rental Duration:</strong> ${days} day${days > 1 ? 's' : ''}</p>
+        <p><strong>Delivery Location(s):</strong> ${locations}</p>
+        <p><strong>Hotel:</strong> ${hotelName}, ${hotelAddress}</p>
+        <p><strong>Discount Applied:</strong> ${discountRate}%</p>
+        ${promoMessage}<hr>
+        <p><strong>Subtotal:</strong> $${subtotal.toFixed(2)}</p>
+        <p><strong>Sales Tax:</strong> $${tax.toFixed(2)}</p>
+        <p><strong>Total:</strong> <span style="color:limegreen; font-size:1.2em">$${total}</span></p>
+      `;
+  
+      renderPayPal(total);
+    }
+    function renderPayPal(amount) {
+      document.getElementById("paypal-button-container").innerHTML = "";
+      paypal.Buttons({
+        createOrder: (data, actions) => {
+          document.getElementById("loadingOverlay").style.display = "flex"; // Show loader
+          return actions.order.create({
+            purchase_units: [{ amount: { value: amount } }]
+          });
+        },
+        onApprove: (data, actions) => {
+          return actions.order.capture().then(async (details) => {
+            document.getElementById("loadingOverlay").style.display = "none";
+            alert("✅ Payment successful! Thank you, " + details.payer.name.given_name);
+  
+            // 🔥 Save data to Supabase
+            const dataToInsert = {
+              full_name: document.getElementById("custName").value,
+              phone: document.getElementById("custPhone").value,
+              email: document.getElementById("custEmail").value,
+              start_date: document.getElementById("startDate").value,
+              end_date: document.getElementById("endDate").value,
+              rental_days: calculateDays(
+                document.getElementById("startDate").value,
+                document.getElementById("endDate").value
+              ),
+              product: document.getElementById("productSelect").value,
+              hotel_name: document.getElementById("hotelName").value,
+              hotel_address: document.getElementById("hotelAddress").value,
+              delivery_location: Array.from(document.querySelectorAll(".location:checked"))
+                .map(loc => loc.value).join(", "),
+              promo_code: document.getElementById("promoCode").value,
+              total_price: amount
+            };
+
+            // Add MailerLite integration
+            try {
+              await subscribeToMailerLite({
+                email: document.getElementById("custEmail").value,
+                name: document.getElementById("custName").value,
+                phone: document.getElementById("custPhone").value,
+                fields: {
+                  product: productCatalog[document.getElementById("productSelect").value].label,
+                  rental_dates: `${document.getElementById("startDate").value} to ${document.getElementById("endDate").value}`,
+                  total_amount: amount
+                }
+              });
+              console.log("✅ Subscribed to MailerLite");
+            } catch (error) {
+              console.error("❌ MailerLite error:", error);
+              // Continue with the process even if MailerLite fails
+            }
+
+            const { error } = await supabase.from(SUPABASE_TABLE).insert([dataToInsert]);
+            if (error) {
+              console.error("❌ Supabase error:", error);
+              alert("There was a problem saving your reservation.");
+            } else {
+              console.log("✅ Saved to Supabase");
+            }
+          });
+        },
+        onCancel: () => {
+          document.getElementById("loadingOverlay").style.display = "none"; // Hide loader
+        },
+        onError: (err) => {
+          document.getElementById("loadingOverlay").style.display = "none"; // Hide loader
+          alert("There was an error processing your payment. Please try again.");
+          console.error(err);
+        }
+      }).render("#paypal-button-container");
+    }
+  
+    updateProgressBar();
+  
+    document.getElementById("startDate").addEventListener("change", updateDurationDisplay);
+    document.getElementById("endDate").addEventListener("change", updateDurationDisplay);
+  
+    // ✅ Calendar popup on input focus (works across all browsers)
+    const startDateInput = document.getElementById("startDate");
+    const endDateInput = document.getElementById("endDate");
+  
+    startDateInput?.addEventListener("focus", () => {
+      if (startDateInput.showPicker) startDateInput.showPicker();
+    });
+    endDateInput?.addEventListener("focus", () => {
+      if (endDateInput.showPicker) endDateInput.showPicker();
+    });
+    // ✅ Inject Rental Duration Display Element
+const durationText = document.createElement("p");
+durationText.id = "durationDisplay";
+durationText.style.fontSize = "1.1em";
+durationText.style.color = "#00fff7";
+durationText.style.marginTop = "8px";
+
+// Find the date step and place it before the "Next" button
+const firstStep = document.querySelector(".step.active");
+const nextButton = firstStep.querySelector(".next");
+firstStep.insertBefore(durationText, nextButton);
+
+// MailerLite integration function
+async function subscribeToMailerLite(userData) {
+  const response = await fetch('https://api.mailerlite.com/api/v2/subscribers', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-MailerLite-ApiKey': apiKey
+    },
+    body: JSON.stringify(userData)
+  });
+  
+  return await response.json();
+}
+</script>
+  
+  <div id="loadingOverlay">
+    <div class="spinner"></div>
+    <p>Processing your payment...</p>
+  </div>  
+</body>
+</html>
+
